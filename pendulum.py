@@ -9,8 +9,8 @@ guiFlag = False
 dt = 1/240 # pybullet simulation step
 th0 = 0.1  # starting position (radian)
 thd = 1.0  # desired position (radian)
-kp = 40.0
-kd = 12.0
+kp = 80.0
+kd = 18.0
 g = 10     # m/s^2
 L = 0.8    # m
 m = 1      # kg
@@ -58,6 +58,7 @@ logVelSim = np.zeros(sz)
 logTauSim = np.zeros(sz)
 logThetaDes = np.zeros(sz)
 logVelDes = np.zeros(sz)
+logErr = np.zeros(sz)
 idx = 0
 
 for t in logTime:
@@ -70,10 +71,11 @@ for t in logTime:
     logVelSim[idx] = vel
     logThetaDes[idx] = th_ref
     logVelDes[idx] = vel_ref
+    logErr[idx] = th - th_ref
 
     e = th - th_ref
     de = vel - vel_ref
-    u = -kp*e - kd*de
+    u = acc_ref - kp*e - kd*de
     tau = (m*L*L) * (g/L*np.sin(th) + u)
     logTauSim[idx] = tau
 
@@ -85,23 +87,37 @@ for t in logTime:
         time.sleep(dt)
 p.disconnect()
 
-plt.subplot(3,1,1)
+idxT = min(int(moveTime / dt), sz - 1)
+print("Project 8: feedback linearization + fifth order polynomial")
+print("T =", moveTime)
+print("theta(T) =", logThetaSim[idxT])
+print("desired theta(T) =", logThetaDes[idxT])
+print("error at T =", logThetaSim[idxT] - logThetaDes[idxT])
+print("final error =", logThetaSim[-1] - thd)
+
+plt.subplot(4,1,1)
 plt.plot(logTime, logThetaSim, 'b', label="Sim Pos")
 plt.plot(logTime, logThetaDes, 'r--', label="Desired Pos")
 plt.axvline(moveTime, color='k', linestyle=':', label="T")
 plt.grid(True)
 plt.legend()
 
-plt.subplot(3,1,2)
+plt.subplot(4,1,2)
 plt.plot(logTime, logVelSim, 'b', label="Sim Vel")
 plt.plot(logTime, logVelDes, 'r--', label="Desired Vel")
 plt.grid(True)
 plt.legend()
 
-plt.subplot(3,1,3)
-plt.plot(logTime, logTauSim, 'b', label="Tau")
+plt.subplot(4,1,3)
+plt.plot(logTime, logErr, 'b', label="Error")
 plt.grid(True)
 plt.legend()
+
+plt.subplot(4,1,4)
+plt.plot(logTime, logTauSim, 'g', label="Tau")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
 plt.show()
 
 # dt = 0.1
