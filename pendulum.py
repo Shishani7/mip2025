@@ -2,32 +2,35 @@ import pybullet as p
 import time
 import pybullet_data
 import numpy as np
-from scipy.integrate import odeint
 import matplotlib.pyplot as plt
-from control.matlab import place, lqr
 
 guiFlag = False
 
 dt = 1/240 # pybullet simulation step
 th0 = 0.1  # starting position (radian)
 thd = 1.0  # desired position (radian)
-kp = 40.0  # proportional coefficient
-ki = 40.0
-kd = 20.0
 g = 10     # m/s^2
 L = 0.8    # m
 m = 1      # kg
-f0 = 10    # applied const force
+moveTime = 2.0 # seconds
+maxTime = 4.0
 
-A = np.array([[0, 1], [-g/L, 0]])
-B = np.array([[0], [1/(m*L*L)]])
-poles = np.array([-10,-20])
-K = -place(A, B, poles) # A-BK
 
-Q = np.array([[1e3,0],[0,1e-2]])
-R = 1e-2
-K, *_ = lqr(A,B,Q,R)
-K = -K
+def fifth_order_traj(t):
+    # fifth-order polynomial from Modern Robotics 9
+    if t > moveTime:
+        t = moveTime
+
+    r = t / moveTime
+    s = 10*r**3 - 15*r**4 + 6*r**5
+    ds = (30*r**2 - 60*r**3 + 30*r**4) / moveTime
+    dds = (60*r - 180*r**2 + 120*r**3) / (moveTime**2)
+
+    th_ref = th0 + s * (thd - th0)
+    vel_ref = ds * (thd - th0)
+    acc_ref = dds * (thd - th0)
+    return th_ref, vel_ref, acc_ref
+
 
 physicsClient = p.connect(p.GUI if guiFlag else p.DIRECT) # or p.DIRECT for non-graphical version
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -41,79 +44,58 @@ p.changeDynamics(boxId, 1, linearDamping=0, angularDamping=0)
 p.changeDynamics(boxId, 2, linearDamping=0, angularDamping=0)
 
 # go to the starting position
-p.setJointMotorControl2(bodyIndex=boxId, jointIndex=1, targetPosition=th0, controlMode=p.POSITION_CONTROL)
-for _ in range(1000):
-    p.stepSimulation()
+p.resetJointState(boxId, 1, th0, 0)
 
 # turn off the motor for the free motion
 p.setJointMotorControl2(bodyIndex=boxId, jointIndex=1, targetVelocity=0, controlMode=p.VELOCITY_CONTROL, force=0)
 
-maxTime = 5 # seconds
-logTime = np.arange(0, 5, dt)
+logTime = np.arange(0, maxTime, dt)
 sz = len(logTime)
 logThetaSim = np.zeros(sz)
 logVelSim = np.zeros(sz)
 logTauSim = np.zeros(sz)
+logThetaDes = np.zeros(sz)
+logVelDes = np.zeros(sz)
 idx = 0
-e_int = 0
-e_prev = 0
+
 for t in logTime:
     th = p.getJointState(boxId, 1)[0]
     vel = p.getJointState(boxId, 1)[1]
+
+    th_ref, vel_ref, acc_ref = fifth_order_traj(t)
+
     logThetaSim[idx] = th
-    e = th - thd
-    e_int += e*dt
-    de = (e - e_prev) / dt
-    e_prev = e
-    # PID regulator
-    # dth = -kp * e -ki * e_int - kd * de
+    logVelSim[idx] = vel
+    logThetaDes[idx] = th_ref
+    logVelDes[idx] = vel_ref
 
-    # Feedback linearization
-    # tau = (m*L*L)*(g/L*np.sin(th) - kp*e - kd * vel)
-
-    tau = K[0,0] * th + K[0,1] * vel
+    # here I only added the trajectory, control will be added later
+    tau = 0
     logTauSim[idx] = tau
 
-    # p.setJointMotorControl2(bodyIndex=boxId, jointIndex=1, targetVelocity=dth, controlMode=p.VELOCITY_CONTROL)
     p.setJointMotorControl2(bodyIndex=boxId, jointIndex=1, force=tau, controlMode=p.TORQUE_CONTROL)
     p.stepSimulation()
-    # p.setJointMotorControl2(bodyIndex=boxId, jointIndex=1, force=f0, controlMode=p.TORQUE_CONTROL)
-    vel = p.getJointState(boxId, 1)[1]
-    logVelSim[idx] = vel
 
     idx += 1
     if guiFlag:
         time.sleep(dt)
 p.disconnect()
 
-def right_part(x, t):
-    return np.array([x[1],
-                     -g/L * np.sin(x[0]) + f0/(m*L*L)])
-
-# substitute with pybullet-based integration method
-theta = odeint(func=right_part,
-               y0=[th0, 0],
-               t=logTime)
-
-# l2-norm sqrt(avg sum of squares of diffs)
-# linf max(abs(diff))
-
-logThetaInt = theta[:,0]
-
 plt.subplot(3,1,1)
 plt.plot(logTime, logThetaSim, 'b', label="Sim Pos")
-plt.plot([logTime[0], logTime[-1]], [thd, thd], 'r--', label="Ref Pos")
-# plt.plot(logTime, logThetaInt, 'r', label="Int Pos")
+plt.plot(logTime, logThetaDes, 'r--', label="Desired Pos")
+plt.axvline(moveTime, color='k', linestyle=':', label="T")
 plt.grid(True)
 plt.legend()
 
 plt.subplot(3,1,2)
 plt.plot(logTime, logVelSim, 'b', label="Sim Vel")
+plt.plot(logTime, logVelDes, 'r--', label="Desired Vel")
 plt.grid(True)
 plt.legend()
 
 plt.subplot(3,1,3)
-plt.plot(logTime, logTauSim, 'b', label="Sim Tau")
+plt.plot(logTime, logTauSim, 'b', label="Tau")
 plt.grid(True)
 plt.legend()
 plt.show()
@@ -136,7 +118,6 @@ plt.show()
 # ddth = u(t)
 # ddth = kp(th-thd)
 # Feedback linearization
-# Линеаризация обратной связью
 
 # dx = ax
 # dx(t) = f(x,t)
