@@ -9,6 +9,8 @@ guiFlag = False
 dt = 1/240 # pybullet simulation step
 th0 = 0.1  # starting position (radian)
 thd = 1.0  # desired position (radian)
+kp = 40.0
+kd = 12.0
 g = 10     # m/s^2
 L = 0.8    # m
 m = 1      # kg
@@ -69,8 +71,10 @@ for t in logTime:
     logThetaDes[idx] = th_ref
     logVelDes[idx] = vel_ref
 
-    # here I only added the trajectory, control will be added later
-    tau = 0
+    e = th - th_ref
+    de = vel - vel_ref
+    u = -kp*e - kd*de
+    tau = (m*L*L) * (g/L*np.sin(th) + u)
     logTauSim[idx] = tau
 
     p.setJointMotorControl2(bodyIndex=boxId, jointIndex=1, force=tau, controlMode=p.TORQUE_CONTROL)
